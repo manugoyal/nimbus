@@ -1,15 +1,28 @@
-import torndb
 import logging
 import argparse
+from util import setup
 
-parser = argparse.ArgumentParser(description='A cloud storage unification service')
-
-db = torndb.Connection('127.0.0.1', '', 'root')
-db.execute('CREATE DATABASE IF NOT EXISTS nimbus')
-db.execute('use nimbus')
-db.execute('CREATE TABLE IF NOT EXISTS test(a int, b int)')
-db.execute('INSERT INTO test VALUES (1, 2), (3, 4)')
-print db.query('SELECT * FROM test')
+class Conf:
+    HOST = '127.0.0.1'
+    DB = 'nimbus'
+    USER = 'root'
+    APP_KEY = '4eoz7ay95gge8yb'
+    APP_SECRET = '3do936xg7vr8bnj'
 
 if __name__ == '__main__':
-    
+    setup.logger()
+
+    parser = argparse.ArgumentParser(description=
+                                     'A cloud storage unification service')
+    parser.add_argument('-refresh-schema', action='store_true', 
+                        help='Recreate the database schema from scratch')
+    args = parser.parse_args()
+    log = logging.getLogger()
+
+    log.info('Setting up the database schema')
+    global data
+    data = dict(conn=setup.database(args, Conf))
+
+    log.info('Setting up backends')
+    setup.backends(data, Conf)
+
