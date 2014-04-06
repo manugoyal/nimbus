@@ -34,13 +34,12 @@ def database(args, data):
         'use %s' % conf.DB,
 
         'CREATE TABLE IF NOT EXISTS accounts(name VARCHAR(255)'
-        'PRIMARY KEY NOT NULL, token varchar(255) NOT NULL)',
+        'PRIMARY KEY NOT NULL, token varchar(5000) NOT NULL)',
 
         'CREATE TABLE IF NOT EXISTS uid(id INT PRIMARY KEY NOT NULL)',
 
-        'CREATE TABLE IF NOT EXISTS filesystem(uid INT NOT NULL,'
-        'path VARCHAR(255) NOT NULL, backend VARCHAR(255) NOT NULL,'
-        'PRIMARY KEY(uid, path))',
+        'CREATE TABLE IF NOT EXISTS filesystem(path VARCHAR(255) NOT NULL PRIMARY KEY,'
+        'backend VARCHAR(255) NOT NULL)',
 
         'CREATE TABLE IF NOT EXISTS log(id INT PRIMARY KEY AUTO_INCREMENT,'
         'uid INT NOT NULL, content VARCHAR(255) NOT NULL, time DATETIME NOT NULL)'
@@ -91,7 +90,7 @@ def client(base_path):
         r = requests.get('http://%s:%s/newUID' % (conf.SERVER_HOST, conf.SERVER_PORT))
         path_data['uid'] = r.json()['uid']
     if 'last_pull' not in path_data:
-        path_data['last_pull'] = datetime.utcfromtimestamp(0).strftime(conf.DATETIME_FORMAT)
+        path_data['last_pull'] = 0
     if 'snapshot' not in path_data:
         path_data['snapshot'] = None
 

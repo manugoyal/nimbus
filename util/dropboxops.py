@@ -27,7 +27,7 @@ def setup(name, conn):
 
     while token is None:
         log.info("Fetching a new dropbox token")
-        flow = dropbox.client.DropboxOAuth2FlowNoRedirect(conf.APP_KEY, conf.APP_SECRET)
+        flow = dropbox.client.DropboxOAuth2FlowNoRedirect(conf.DROPBOX_APP_KEY, conf.DROPBOX_APP_SECRET)
         authorize_url = flow.start()
         print '1. Go to: ' + authorize_url
         print '2. Click "Allow" (you might have to log in first)'
@@ -46,9 +46,10 @@ def setup(name, conn):
             "INSERT INTO accounts VALUES (%s, %s) ON DUPLICATE KEY UPDATE token=%s",
             name, token, token)
 
+    client = dropbox.client.DropboxClient(token)
+
     def has_space(size):
         """Returns true if dropbox has >= size space"""
-        client = dropbox.client.DropboxClient(token)
         space = client.account_info()['quota_info']['quota']
         return (space >= size)
 
@@ -65,8 +66,9 @@ def get_client():
     else:
         return dropbox.client.DropboxClient(rjson['token'])
 
-def put_file(path, fileObj):
+def put_file(path, filePath):
     client = get_client()
+    fileObj = open(filePath, 'rb')
     if client is not None:
         return client.put_file(path, fileObj, overwrite=True)
 
@@ -80,7 +82,7 @@ def delete(path):
     if client is not None:
         return client.file_delete(path)
 
-def move(srcpath, dstpath):
+def move(srcpath, dstpath, isdir):
     client = get_client()
     if client is not None:
         return client.file_move(srcpath, dstpath)
@@ -88,7 +90,7 @@ def move(srcpath, dstpath):
 def get_file(path):
     client = get_client()
     if client is not None:
-        return client.get_file(path)
+        return client.get_file(path).read()
 
 def fileops():
     return {'put_file': put_file,

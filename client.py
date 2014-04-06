@@ -46,6 +46,8 @@ def create_snapshot_diff(path_data, base_path):
         # Diff this snapshot with the original snapshot and create
         # events out of that
         diff = dirsnapshot.DirectorySnapshotDiff(path_data['snapshot'], ds)
+        print path_data['snapshot']
+        print ds
         for dd in diff.dirs_deleted:
             direvents.append(dict(type='deleted', path=resolve(dd), isdir=True))
         for dc in diff.dirs_created:
@@ -54,26 +56,29 @@ def create_snapshot_diff(path_data, base_path):
         # We don't care about modified directories
         for dm in diff.dirs_moved:
             direvents.append(dict(type='moved', path=resolve(dm[0]),
-                                  dstpath=resolve(dm[1])))
+                                  dstpath=resolve(dm[1]), isdir=True))
         for fd in diff.files_deleted:
             fileevents.append(dict(type='deleted', path=resolve(fd), isdir=False))
         for fc in diff.files_created:
             fileevents.append(dict(type='created', path=resolve(fc),
                                    isdir=False, size=ds.stat_info(fc).st_size))
         for fm in diff.files_modified:
-            fileevents.append(dict(type='modified', path=resolve(fm)))
+            # We only consider files modified if the size or mode is
+            # different
+            pdinfo = path_data['snapshot'].stat_info(fm)
+            dsinfo = ds.stat_info(fm)
+            if pdinfo.st_mode != dsinfo.st_mode or pdinfo.st_size != dsinfo.st_size:
+                fileevents.append(dict(type='modified', path=resolve(fm), isdir=False))
         for fm in diff.files_moved:
             fileevents.append(dict(type='moved', path=resolve(fm[0]),
-                                  dstpath=resolve(fm[1])))
+                                   dstpath=resolve(fm[1]), isdir=False))
 
-    # We sort direvents in the hope that parent directories come
-    # before child ones. Also we remove direvents with path="."
-    direvents = sorted([de for de in direvents if de['path'] != '.'],
-                       key = lambda de: de['path'])
+    # We remove direvents with path="."
+    direvents = [de for de in direvents if de['path'] != '.']
     # Store the latest snapshot and return the events
     path_data['snapshot'] = ds
     return direvents + fileevents
-                                       
+
 def server_sender(path_data, base_path, events):
     """Polls the global queue for events and sends them to the server to
     figure out what to do about them. Returns the poll time from the server
@@ -83,36 +88,36 @@ def server_sender(path_data, base_path, events):
     log = logging.getLogger(conf.LOGGER)
     log.info(events)
 
-    r = requests.post('http://%s:%s/postEvents' % 
-                      (conf.SERVER_HOST, conf.SERVER_PORT), 
-                      data={'uid': path_data['uid'], 
+    r = requests.post('http://%s:%s/postEvents' %
+                      (conf.SERVER_HOST, conf.SERVER_PORT),
+                      data={'uid': path_data['uid'],
                             'events': json.dumps(events)})
     try:
         client_ops = r.json()['client_ops']
+        utcstr = r.json()['utcstr']
 
-        # Executes the returned client operations. We prepend the uid to
-        # all the paths to differentiate identically-named files from
-        # different clients
-        def cloud_path(e):
-            return str(e['uid']) + e['path']
+        log.info('CLIENT_OPS: ' + str(client_ops))
+
+        # Executes the returned client operations.
+        log.info("Executing client cloud operations")
         def fs_path(e):
             return os.path.join(base_path, e['path'])
 
         for e in client_ops:
+            print e
             fileops = backends.BACKENDS[e['backend']]['fileops']
             if e['type'] == 'created':
                 if e['isdir']:
-                    fileops['create_folder'](cloud_path(e))
+                    fileops['create_folder'](e['path'])
                 else:
-                    f = open(fs_path(e), 'rb')
-                    fileops['put_file'](cloud_path(e), f)
+                    print 'creating file'
+                    fileops['put_file'](e['path'], fs_path(e))
             elif e['type'] == 'deleted':
-                fileops['delete'](cloud_path(e))
+                fileops['delete'](e['path'])
             elif e['type'] == 'modified':
-                f = open(fs_path(e), 'rb')
-                fileops['put_file'](cloud_path(e), f)
+                fileops['put_file'](e['path'], fs_path(e))
             elif e['type'] == 'moved':
-                fileops['move'](cloud_path(e), cloud_path(e))
+                fileops['move'](e['path'], e['dstpath'], e['isdir'])
             else:
                 log.error("Unknown op type %s" % e['type'])
     except Exception, e:
@@ -121,7 +126,10 @@ def server_sender(path_data, base_path, events):
         log.error(str(e))
     finally:
         requests.post('http://%s:%s/completePost' %
-                      (conf.SERVER_HOST, conf.SERVER_PORT))
+                      (conf.SERVER_HOST, conf.SERVER_PORT),
+                      data={'uid': path_data['uid'],
+                            'events': json.dumps(client_ops),
+                            'utcstr': utcstr})
 
 def server_poller(path_data, base_path):
     """Polls the server log for changes due to other clients and replays
@@ -133,62 +141,87 @@ def server_poller(path_data, base_path):
                      params={'uid': path_data['uid'],
                              'last_pull': path_data['last_pull']})
     rjson = r.json()
-    path_data['last_pull'] = rjson['pull_time']
+    path_data['last_pull'] = rjson['last_id']
     replayevents = rjson['events']
 
     try:
-        # Executes the returned client operations. We prepend the uid to
-        # all the paths to differentiate identically-named files from
-        # different clients
-        def cloud_path(e):
-            return str(e['uid']) + e['path']
-        def fs_path(e):
-            return os.path.join(base_path, e['path'])
+        # Executes the returned log operations
+        log.info("Executing fetched log operations, from %d" % path_data['last_pull'])
+        def fs_path(path):
+            return os.path.join(base_path, path)
 
         for re in replayevents:
-            e = json.loads(re)
-            log.debug(e)
-            fileops = backends.BACKENDS[e['backend']]['fileops']
-            if e['type'] == 'created':
-                if e['isdir']:
-                    os.mkdir(fs_path(e))
+            try:
+                e = json.loads(re)
+                log.debug(e)
+                fileops = backends.BACKENDS[e['backend']]['fileops']
+                if e['type'] == 'created':
+                    if e['isdir']:
+                        os.makedirs(fs_path(e['path']))
+                    else:
+                        fspath = fs_path(e['path'])
+                        # Create the directories up to fspath
+                        try:
+                            os.makedirs(os.path.dirname(fspath))
+                        except:
+                            pass
+                        with open(fspath, 'wb') as out:
+                            fcontent = fileops['get_file'](e['path'])
+                            log.debug("writing: " + fcontent)
+                            out.write(fcontent)
+                elif e['type'] == 'deleted':
+                    if e['isdir']:
+                        shutil.rmtree(fs_path(e['path']))
+                    else:
+                        os.remove(fs_path(e['path']))
+                elif e['type'] == 'modified':
+                    with open(fs_path(e['path']), 'wb') as out:
+                        fcontent = fileops['get_file'](e['path'])
+                        log.debug("writing: " + fcontent)
+                        out.write(fcontent)
+                elif e['type'] == 'moved':
+                    srcpath, dstpath = fs_path(e['path']), fs_path(e['dstpath'])
+                    if os.path.exists(dstpath):
+                        # We're going to assume e['path'] is a parent
+                        # directory or something, that has already
+                        # been created, so we'll just delete e['path']
+                        if os.path.isdir(srcpath):
+                            os.rmdir(srcpath)
+                        else:
+                            os.remove(srcpath)
+                    else:
+                        # Create the directories up to dstpath
+                        try:
+                            os.makedirs(os.path.dirname(dstpath))
+                        except:
+                            pass
+                        shutil.move(srcpath, dstpath)
                 else:
-                    out = open(fs_path(e), 'wb')
-                    with fileops['get_file'](cloud_path(e)) as f:
-                        out.write(f.read())
-            elif e['type'] == 'deleted':
-                if e['isdir']:
-                    shutil.rmtree(fs_path(e))
-                else:
-                    os.remove(fs_path(e))
-            elif e['type'] == 'modified':
-                out = open(fs_path(e), 'wb')
-                with fileops['get_file'](cloud_path(e)) as f:
-                    out.write(f.read())
-            elif e['type'] == 'moved':
-                shutil.move(fs_path(e), fs_path(e))
-            else:
-                log.error("Unknown op type %s" % e['type'])
-
-        path_data['snapshot'] = dirsnapshot.DirectorySnapshot(base_path, True)
+                    log.error("Unknown op type %s" % e['type'])
+            except Exception, e:
+                log.warning(str(e))
 
     except Exception, e:
         _, _, exec_traceback = sys.exc_info()
         traceback.print_tb(exec_traceback, limit=1, file=sys.stdout)
         log.error(str(e))
-    
+
+
+    path_data['last_pull'] += len(replayevents)
+    path_data['snapshot'] = dirsnapshot.DirectorySnapshot(base_path, True)
+    print 'After polling, snapshot'
+    print path_data['snapshot']
 
 if __name__ == '__main__':
     setup.logger()
     log = logging.getLogger(conf.LOGGER)
 
-    parser = argparse.ArgumentParser(description=
-                                     'A cloud storage unification service')
-    parser.add_argument('-path', default='', 
+    parser = argparse.ArgumentParser(description='A cloud storage unification service')
+    parser.add_argument('-path', default='',
                         help="The path of the folder to look at")
     args = parser.parse_args()
     base_path = os.path.normpath(args.path)
-    
+
     path_data = setup.client(base_path)
 
     def signal_handler(signum, frame):
