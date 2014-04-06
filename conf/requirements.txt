@@ -8,6 +8,7 @@ argh==0.24.1
 dropbox==2.0.0
 itsdangerous==0.24
 pathtools==0.1.2
+requests==2.2.1
 torndb==0.2
 urllib3==1.8
 watchdog==0.7.1
