@@ -92,9 +92,14 @@ def get_file(path):
     if client is not None:
         return client.get_file(path).read()
 
+def get_link(path, token):
+    client = dropbox.client.DropboxClient(token)
+    return client.share(path)["url"]
+
 def fileops():
     return {'put_file': put_file,
             'get_file': get_file,
             'create_folder': create_folder,
             'delete': delete,
-            'move': move}
+            'move': move,
+            'get_link': get_link}

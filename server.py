@@ -1,14 +1,17 @@
 import logging
 import argparse
-from util import setup, conf
-from flask import Flask, request
+from util import setup, conf, backends
+from flask import Flask, request, send_from_directory
 import pickle
 import json
 from datetime import datetime
 import threading
 import random
+import os.path
+import os
 
 app = Flask(__name__)
+web_files = os.path.join(os.getcwd(), 'web')
 transaction_lock = threading.Lock()
 
 @app.route('/newUID', methods=['GET'])
@@ -48,13 +51,6 @@ def postEvents():
     utcnow = datetime.utcnow()
     utcstr = utcnow.strftime(conf.DATETIME_FORMAT)
 
-    # We now proceed with the transaction. For simplicity, concurrent
-    # transactions are serialized with transaction_lock. We
-    # simultaneously modify the databases's filesystem representation
-    # and log events. Since the client needs to actually do the cloud
-    # operations, we don't release the transaction lock when we're
-    # done with this function. Instead, we return a list of operations
-    # for the client and wait for it to respond, then release the lock.
     try:
         client_ops = []
 
@@ -143,7 +139,6 @@ def completePost():
 
 @app.route('/fetchLog', methods=['GET'])
 def fetchLog():
-
     """Returns all log events that aren't from the given uid since the
     given time. Also returns the current server time for the next
     pull.
@@ -174,6 +169,53 @@ def fetchLog():
         pass
         transaction_lock.release()
 
+@app.route('/fetchTree', methods=['GET'])
+def fetchTree():
+    """Turns the files in filesystem into a tree. Used for the javascript
+    client.
+
+    """
+    conn = setup.get_connection()
+    files = conn.query('SELECT path from filesystem')
+
+    tree = {}
+    def add_path(path):
+        def add_path_helper(t, p):
+            (head, tail) = os.path.split(p)
+            if head == '':
+                t[tail] = path
+            else:
+                t[head] = {}
+                add_path_helper(t[head], tail)
+        add_path_helper(tree, path)
+
+    for f in files:
+        add_path(f.path)
+
+    return json.dumps(tree)
+
+@app.route('/fetchFile', methods=['GET'])
+def fetchFile():
+    """Returns a link for the specified file."""
+    path = request.args.keys()[0]
+    print path
+    conn = setup.get_connection()
+    f = conn.query('SELECT backend FROM filesystem WHERE path=%s', path)
+    if len(f) == 0:
+        link = ''
+    else:
+        backend = f[0].backend
+        link = backends.BACKENDS[backend]['fileops']['get_link'] (path, data['backends'][backend]['token'])
+    return json.dumps({'link': link})
+
+
+@app.route('/', methods=['GET'])
+def root():
+    return send_from_directory(web_files, 'index.html')
+
+@app.route('/js/<filename>', methods=['GET'])
+def js(filename):
+    return send_from_directory(web_files, filename)
 
 if __name__ == '__main__':
     setup.logger()

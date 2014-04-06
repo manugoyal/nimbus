@@ -97,29 +97,41 @@ def create_folder(path):
 
 def delete(path):
     client = get_client()
-    f = get_drivefile(path, client)
-    client.files().delete(fileId=f['id']).execute()
+    if client is not None:
+        f = get_drivefile(path, client)
+        client.files().delete(fileId=f['id']).execute()
 
 def move(srcpath, dstpath, isdir):
-    client = get_client()
     if not isdir:
-        f = get_drivefile(srcpath, client)
-        body = {'title': dstpath, 'description': dstpath, 'mimeType': 'text/plain'}
-        client.files().update(fileId=f['id'], body=body).execute()
+        client = get_client()
+        if client is not None:
+            f = get_drivefile(srcpath, client)
+            body = {'title': dstpath, 'description': dstpath, 'mimeType': 'text/plain'}
+            client.files().update(fileId=f['id'], body=body).execute()
 
 def get_file(path):
     client = get_client()
+    if client is not None:
+        f = get_drivefile(path, client)
+        download_url = f.get('downloadUrl')
+        if download_url:
+            resp, content = client._http.request(download_url)
+            if resp.status == 200:
+                return content
+        return None
+
+def get_link(path, tokenstr):
+    http = httplib2.Http()
+    token = pickle.loads(str(tokenstr))
+    token.authorize(http)
+    client = build('drive', 'v2', http=http)
     f = get_drivefile(path, client)
-    download_url = f.get('downloadUrl')
-    if download_url:
-        resp, content = client._http.request(download_url)
-        if resp.status == 200:
-            return content
-    return None
+    return f.get('alternateLink')
 
 def fileops():
     return {'put_file': put_file,
             'get_file': get_file,
             'create_folder': create_folder,
             'delete': delete,
-            'move': move}
+            'move': move,
+            'get_link': get_link}

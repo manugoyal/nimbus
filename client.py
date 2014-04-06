@@ -46,8 +46,6 @@ def create_snapshot_diff(path_data, base_path):
         # Diff this snapshot with the original snapshot and create
         # events out of that
         diff = dirsnapshot.DirectorySnapshotDiff(path_data['snapshot'], ds)
-        print path_data['snapshot']
-        print ds
         for dd in diff.dirs_deleted:
             direvents.append(dict(type='deleted', path=resolve(dd), isdir=True))
         for dc in diff.dirs_created:
@@ -104,13 +102,11 @@ def server_sender(path_data, base_path, events):
             return os.path.join(base_path, e['path'])
 
         for e in client_ops:
-            print e
             fileops = backends.BACKENDS[e['backend']]['fileops']
             if e['type'] == 'created':
                 if e['isdir']:
                     fileops['create_folder'](e['path'])
                 else:
-                    print 'creating file'
                     fileops['put_file'](e['path'], fs_path(e))
             elif e['type'] == 'deleted':
                 fileops['delete'](e['path'])
@@ -167,7 +163,6 @@ def server_poller(path_data, base_path):
                             pass
                         with open(fspath, 'wb') as out:
                             fcontent = fileops['get_file'](e['path'])
-                            log.debug("writing: " + fcontent)
                             out.write(fcontent)
                 elif e['type'] == 'deleted':
                     if e['isdir']:
@@ -177,7 +172,6 @@ def server_poller(path_data, base_path):
                 elif e['type'] == 'modified':
                     with open(fs_path(e['path']), 'wb') as out:
                         fcontent = fileops['get_file'](e['path'])
-                        log.debug("writing: " + fcontent)
                         out.write(fcontent)
                 elif e['type'] == 'moved':
                     srcpath, dstpath = fs_path(e['path']), fs_path(e['dstpath'])
@@ -209,8 +203,6 @@ def server_poller(path_data, base_path):
 
     path_data['last_pull'] += len(replayevents)
     path_data['snapshot'] = dirsnapshot.DirectorySnapshot(base_path, True)
-    print 'After polling, snapshot'
-    print path_data['snapshot']
 
 if __name__ == '__main__':
     setup.logger()
