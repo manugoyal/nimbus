@@ -50,7 +50,8 @@ def setup(name, conn):
 
     def has_space(size):
         """Returns true if dropbox has >= size space"""
-        space = client.account_info()['quota_info']['quota']
+        quota_info = client.account_info()['quota_info']
+        space = quota_info['quota'] - quota_info['normal']
         return (space >= size)
 
     return token, has_space

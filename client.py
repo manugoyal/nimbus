@@ -201,7 +201,6 @@ def server_poller(path_data, base_path):
         log.error(str(e))
 
 
-    path_data['last_pull'] += len(replayevents)
     path_data['snapshot'] = dirsnapshot.DirectorySnapshot(base_path, True)
 
 if __name__ == '__main__':

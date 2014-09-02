@@ -44,7 +44,8 @@ def setup(name, conn):
 
     def has_space(size):
         """Returns true if drive has >= size space"""
-        space = client.about().get().execute()['quotaBytesTotal']
+        about = client.about().get().execute()
+        space = about['quotaBytesTotal'] - about['quotaBytesUsed']
         return (space >= size)
 
     return tokenstr, has_space

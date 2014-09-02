@@ -176,21 +176,31 @@ def fetchTree():
 
     """
     conn = setup.get_connection()
-    files = conn.query('SELECT path from filesystem')
+    files = conn.query('SELECT path FROM filesystem')
 
     tree = {}
-    def add_path(path):
-        def add_path_helper(t, p):
-            (head, tail) = os.path.split(p)
-            if head == '':
-                t[tail] = path
-            else:
-                t[head] = {}
-                add_path_helper(t[head], tail)
-        add_path_helper(tree, path)
+    def add_path(tree, path):
+        dirs = path.split(os.sep)
+        inner = tree
+        for d in dirs:
+            if d not in inner:
+                inner[d] = {}
+            inner = inner[d]
+
+    def add_pathname(tree, path):
+        dirs = path.split(os.sep)
+        inner1 = tree
+        inner2 = inner1
+        for d in dirs:
+            inner1 = inner2
+            inner2 = inner2[d]
+        if inner1[dirs[-1]] == {}:
+            inner1[dirs[-1]] = path
 
     for f in files:
-        add_path(f.path)
+        add_path(tree, f.path)
+    for f in files:
+        add_pathname(tree, f.path)
 
     return json.dumps(tree)
 
